@@ -453,3 +453,4 @@ class OneOrEightChannelBenchmarkConfig extends Config(new WithOneOrMaxChannels +
 
 class SimulateBackupMemConfig extends Config(){ Dump("MEM_BACKUP_EN", true) }
 class BackupMemVLSIConfig extends Config(new SimulateBackupMemConfig ++ new DefaultVLSIConfig)
+class EightChannelBackupMemVLSIConfig extends Config(new With8MemoryChannels ++ new BackupMemVLSIConfig)
