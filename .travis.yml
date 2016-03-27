@@ -17,6 +17,9 @@ cache:
     target
     uncore/target
     zscale/target
+    xfiles-dana/tests/install
+    xfiles-dana/target
+    xfiles-dana/project/target
 
 # packages needed to build riscv-tools
 addons:
@@ -38,18 +41,19 @@ addons:
       - bison
       - flex
       - texinfo
+      - dc
+      - python-numpy
+      - python-matplotlib
 
 env:
+  global:
+    - ROCKETCHIP_ADDONS=xfiles-dana
+    - PATH=$PATH:$XFILES/usr/bin
   matrix:
-    - CONFIG=DefaultConfig
-    - CONFIG=RoccExampleConfig
-    - CONFIG=DmaControllerConfig
-    - CONFIG=MemtestConfig
-    - CONFIG=MemtestL2Config
-    - CONFIG=BroadcastRegressionTestConfig
-    - CONFIG=CacheRegressionTestConfig
-    - CONFIG=UnitTestConfig
-    - CONFIG=SplitL2MetadataTestConfig
+    - PES=4 EPB=4
+    - PES=8 EPB=8
+    - PES=16 EPB=16
+    - PES=32 EPB=32
 
 # blacklist private branches
 branches:
@@ -61,13 +65,11 @@ branches:
 before_install:
   - rm riscv-tools/.travis.yml
   - export CXX=g++-4.8 CC=gcc-4.8
+  - export CPP_CONFIG=XFilesDanaCppPe$PES\Epb$EPB\Config
 
 script:
-  - make vsim-verilog -C regression CONFIG=$CONFIG TORTURE_CONFIG=default CHISEL_VERSION=3
-  - make fsim-verilog -C regression CONFIG=$CONFIG TORTURE_CONFIG=default
-  - make emulator-ndebug -C regression CONFIG=$CONFIG TORTURE_CONFIG=default
-  - make emulator-asm-tests   -C regression CONFIG=$CONFIG TORTURE_CONFIG=default
-  - make emulator-bmark-tests -C regression CONFIG=$CONFIG TORTURE_CONFIG=default -j1
+  - cd xfiles-dana/tests
+  - ./regress.sh
 
 before_cache:
   - ls -tr regression/install | tail -n+2 | sed s@^@regression/install/@ | xargs rm -rf

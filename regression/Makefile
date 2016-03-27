@@ -82,10 +82,13 @@ $(RISCV)/install.stamp:
 	mkdir -p $(dir $@)
 	git -C $(abspath $(TOP)) submodule update --init riscv-tools
 	git -C $(abspath $(TOP))/riscv-tools submodule update --init --recursive riscv-gnu-toolchain
+	(cd $(abspath $(TOP))/riscv-tools/riscv-gnu-toolchain && git cherry-pick -n 4a4918a)
 	git -C $(abspath $(TOP))/riscv-tools submodule update --init --recursive riscv-isa-sim
 	git -C $(abspath $(TOP))/riscv-tools submodule update --init --recursive riscv-fesvr
 	git -C $(abspath $(TOP))/riscv-tools submodule update --init --recursive riscv-opcodes
 	git -C $(abspath $(TOP))/riscv-tools submodule update --init --recursive riscv-pk
+	(cd $(abspath $(TOP))/riscv-tools/riscv-pk && \
+		git apply ../../xfiles-dana/patches/riscv-pk-xfiles-syscalls.patch)
 	git -C $(abspath $(TOP))/riscv-tools submodule update --init --recursive riscv-tests
 	+cd $(abspath $(TOP))/riscv-tools; RISCV=$(abspath $(RISCV)) ./build.sh
 	date > $@
