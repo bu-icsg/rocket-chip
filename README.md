@@ -1,4 +1,4 @@
-Rocket Chip Generator [![Build Status](https://travis-ci.org/ucb-bar/rocket-chip.svg?branch=master)](https://travis-ci.org/ucb-bar/rocket-chip)
+Rocket Chip Generator [![Build Status](https://travis-ci.org/bu-icsg/rocket-chip.svg?branch=xfiles-dana)](https://travis-ci.org/bu-icsg/rocket-chip)
 =====================
 
 This repository contains the Rocket chip generator necessary to instantiate
@@ -389,7 +389,7 @@ on your host machine):
 
     $ cd $ROCKETCHIP/vsim
     $ make -jN run
- 
+
 The generated output looks similar to those generated from the emulator.
 Look into vsim/output/\*.out for the output of the executed assembly
 tests and benchmarks.
@@ -447,4 +447,3 @@ post, so please stay tuned.
 - Stephen Twigg
 - Huy Vo
 - Andrew Waterman
-
