@@ -105,7 +105,7 @@ class DefaultConfig extends Config (
       case "L1I" => {
         case NSets => Knob("L1I_SETS") //64
         case NWays => Knob("L1I_WAYS") //4
-        case RowBits => 4*site(CoreInstBits)
+        case RowBits => site(TLKey("L1toL2")).dataBitsPerBeat
         case NTLBEntries => 8
         case CacheIdBits => 0
         case SplitMetadata => false
@@ -113,7 +113,7 @@ class DefaultConfig extends Config (
       case "L1D" => {
         case NSets => Knob("L1D_SETS") //64
         case NWays => Knob("L1D_WAYS") //4
-        case RowBits => 2*site(CoreDataBits)
+        case RowBits => site(TLKey("L1toL2")).dataBitsPerBeat
         case NTLBEntries => 8
         case CacheIdBits => 0
         case SplitMetadata => false
@@ -217,7 +217,10 @@ class DefaultConfig extends Config (
           maxClientsPerPort = site(NAcquireTransactors) + 2,
           maxManagerXacts = 1,
           dataBits = site(CacheBlockBytes)*8)
-      case TLKey("Outermost") => site(TLKey("L2toMC")).copy(dataBeats = site(MIFDataBeats))
+      case TLKey("Outermost") => site(TLKey("L2toMC")).copy(
+        maxClientXacts = site(NAcquireTransactors) + 2,
+        maxClientsPerPort = site(MaxBanksPerMemoryChannel),
+        dataBeats = site(MIFDataBeats))
       case TLKey("L2toMMIO") => {
         val addrMap = new AddrHashMap(site(GlobalAddrMap), site(MMIOBase))
         TileLinkParameters(
@@ -365,6 +368,7 @@ class WithZscale extends Config(
 class WithRV32 extends Config(
   (pname,site,here) => pname match {
     case XLen => 32
+    case UseVM => false
     case UseFPU => false
   }
 )
@@ -385,7 +389,7 @@ class SmallConfig extends Config (
       case UseFPU => false
       case FastMulDiv => false
       case NTLBEntries => 4
-      case BtbKey => BtbParameters(nEntries = 8)
+      case BtbKey => BtbParameters(nEntries = 0)
       case StoreDataQueueDepth => 2
       case ReplayQueueDepth => 2
       case NAcquireTransactors => 2
@@ -401,7 +405,7 @@ class SmallConfig extends Config (
 
 class DefaultFPGASmallConfig extends Config(new SmallConfig ++ new DefaultFPGAConfig)
 
-class DefaultRV32Config extends Config(new WithRV32 ++ new DefaultConfig)
+class DefaultRV32Config extends Config(new SmallConfig ++ new WithRV32 ++ new DefaultConfig)
 
 class ExampleSmallConfig extends Config(new SmallConfig ++ new DefaultConfig)
 
