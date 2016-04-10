@@ -228,9 +228,6 @@ class OuterMemorySystem(implicit val p: Parameters) extends Module with HasTopLe
   // Create a simple L1toL2 NoC between the tiles+htif and the banks of outer memory
   // Cached ports are first in client list, making sharerToClientId just an indentity function
   // addrToBank is sed to hash physical addresses (of cache blocks) to banks (and thereby memory channels)
-  val ordered_clients = (io.tiles_cached ++
-    (io.tiles_uncached ++ Seq(rtc.io, io.htif_uncached))
-      .map(TileLinkIOWrapper(_))) 
   def sharerToClientId(sharerId: UInt) = sharerId
   def addrToBank(addr: Bits): UInt = {
     Mux(addr.toUInt < UInt(mmioBase >> log2Up(p(CacheBlockBytes))),
@@ -238,8 +235,7 @@ class OuterMemorySystem(implicit val p: Parameters) extends Module with HasTopLe
       UInt(nBanks))
   }
   val preBuffering = TileLinkDepths(2,2,2,2,2)
-  val postBuffering = TileLinkDepths(0,0,1,0,0) //TODO: had EOS24 crit path on inner.release
-  val l1tol2net = Module(new RocketChipTileLinkCrossbar(addrToBank, sharerToClientId, preBuffering, postBuffering))
+  val l1tol2net = Module(new PortedTileLinkCrossbar(addrToBank, sharerToClientId, preBuffering))
 
   // Create point(s) of coherence serialization
   val managerEndpoints = List.tabulate(nBanks){id => p(BuildL2CoherenceManager)(id, p)}
@@ -253,7 +249,8 @@ class OuterMemorySystem(implicit val p: Parameters) extends Module with HasTopLe
 
   // Wire the tiles and htif to the TileLink client ports of the L1toL2 network,
   // and coherence manager(s) to the other side
-  l1tol2net.io.clients <> ordered_clients
+  l1tol2net.io.clients_cached <> io.tiles_cached
+  l1tol2net.io.clients_uncached <> io.tiles_uncached ++ Seq(rtc.io, io.htif_uncached)
   l1tol2net.io.managers <> managerEndpoints.map(_.innerTL) :+ mmioManager.io.inner
 
   // Create a converter between TileLinkIO and MemIO for each channel
@@ -278,11 +275,13 @@ class OuterMemorySystem(implicit val p: Parameters) extends Module with HasTopLe
                 "More memory channels elaborated than can be enabled")
   val mem_ic =
     if (channelConfigs.size == 1) {
-      val ic = Module(new NastiMemoryInterconnect(nBanksPerMemChannel, nMemChannels))
+      val ic = Module(new TileLinkMemoryInterconnect(
+        nBanksPerMemChannel, nMemChannels)(outermostTLParams))
       ic
     } else {
       val nBanks = nBanksPerMemChannel * nMemChannels
-      val ic = Module(new NastiMemorySelector(nBanks, nMemChannels, channelConfigs))
+      val ic = Module(new TileLinkMemorySelector(
+        nBanks, nMemChannels, channelConfigs)(outermostTLParams))
       ic.io.select := io.memory_channel_mux_select
       ic
     }
@@ -290,11 +289,9 @@ class OuterMemorySystem(implicit val p: Parameters) extends Module with HasTopLe
   for ((bank, i) <- managerEndpoints.zipWithIndex) {
     val unwrap = Module(new ClientTileLinkIOUnwrapper()(outerTLParams))
     val narrow = Module(new TileLinkIONarrower("L2toMC", "Outermost"))
-    val conv = Module(new NastiIOTileLinkIOConverter()(outermostTLParams))
     unwrap.io.in <> ClientTileLinkEnqueuer(bank.outerTL, backendBuffering)(outerTLParams)
     narrow.io.in <> unwrap.io.out
-    conv.io.tl <> narrow.io.out
-    TopUtils.connectNasti(mem_ic.io.masters(i), conv.io.nasti)
+    mem_ic.io.in(i) <> narrow.io.out
   }
 
   val mmioOutermostTLParams = p.alterPartial({case TLId => "MMIO_Outermost"})
@@ -307,8 +304,8 @@ class OuterMemorySystem(implicit val p: Parameters) extends Module with HasTopLe
   mmio_narrow.io.in <> mmioManager.io.outer
   mmio_net.io.in.head <> mmio_narrow.io.out
 
-  def connectTilelinkNasti(nasti: NastiIO, tl: ClientUncachedTileLinkIO) = {
-    val conv = Module(new NastiIOTileLinkIOConverter()(mmioOutermostTLParams))
+  def connectTilelinkNasti(nasti: NastiIO, tl: ClientUncachedTileLinkIO)(implicit p: Parameters) = {
+    val conv = Module(new NastiIOTileLinkIOConverter())
     conv.io.tl <> tl
     TopUtils.connectNasti(nasti, conv.io.nasti)
   }
@@ -317,13 +314,13 @@ class OuterMemorySystem(implicit val p: Parameters) extends Module with HasTopLe
     val csrName = s"conf:csr$i"
     val csrPort = addrHashMap(csrName).port
     val conv = Module(new SmiIONastiIOConverter(xLen, csrAddrBits))
-    connectTilelinkNasti(conv.io.nasti, mmio_net.io.out(csrPort))
+    connectTilelinkNasti(conv.io.nasti, mmio_net.io.out(csrPort))(mmioOutermostTLParams)
     io.csr(i) <> conv.io.smi
   }
 
   val scrPort = addrHashMap("conf:scr").port
   val scr_conv = Module(new SmiIONastiIOConverter(scrDataBits, scrAddrBits))
-  connectTilelinkNasti(scr_conv.io.nasti, mmio_net.io.out(scrPort))
+  connectTilelinkNasti(scr_conv.io.nasti, mmio_net.io.out(scrPort))(mmioOutermostTLParams)
   io.scr <> scr_conv.io.smi
 
   if (p(UseStreamLoopback)) {
@@ -331,14 +328,19 @@ class OuterMemorySystem(implicit val p: Parameters) extends Module with HasTopLe
     val lo_size = p(StreamLoopbackSize)
     val lo_conv = Module(new NastiIOStreamIOConverter(lo_width))
     val lo_port = addrHashMap("devices:loopback").port
-    connectTilelinkNasti(lo_conv.io.nasti, mmio_net.io.out(lo_port))
+    connectTilelinkNasti(lo_conv.io.nasti, mmio_net.io.out(lo_port))(mmioOutermostTLParams)
     lo_conv.io.stream.in <> Queue(lo_conv.io.stream.out, lo_size)
   }
 
   val dtPort = addrHashMap("conf:devicetree").port
-  connectTilelinkNasti(io.deviceTree, mmio_net.io.out(dtPort))
+  connectTilelinkNasti(io.deviceTree, mmio_net.io.out(dtPort))(mmioOutermostTLParams)
 
-  val mem_channels = mem_ic.io.slaves
+  val mem_channels = Wire(Vec(nMemChannels, new NastiIO))
+
+  mem_channels.zip(mem_ic.io.out).foreach { case (ch, out) =>
+    connectTilelinkNasti(ch, out)(outermostTLParams)
+  }
+
   // Create a SerDes for backup memory port
   if(p(UseBackupMemoryPort)) {
     VLSIUtils.doOuterMemorySystemSerdes(
